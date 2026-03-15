@@ -6,7 +6,7 @@ priorities for next 10 minutes:
 3. Add toggles for different data sources on the bottom
 1. add canada, mexico, and china
   - Reach: europe, south america, asia, africa
-3. Location of existing data centres
+3. Location of existing data centers
 4. Transmission lines
 5. Fibre connectivity
 6. Distance to grid

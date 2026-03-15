@@ -5,6 +5,11 @@ import os
 app = Flask(__name__)
 
 BASE = os.path.dirname(__file__)
+BOUNDARY_FILES = (
+    "data/boundaries/can_scored.geojson",
+    "data/boundaries/chn_scored.geojson",
+    "data/boundaries/mex_scored.geojson",
+)
 
 _cache = {}
 
@@ -15,11 +20,22 @@ def load_geojson(path):
     return _cache[path]
 
 
+def load_scored_boundaries():
+    cache_key = "scored_boundaries_merged"
+    if cache_key not in _cache:
+        merged_features = []
+        for path in BOUNDARY_FILES:
+            geojson = load_geojson(path)
+            merged_features.extend(geojson.get("features", []))
+        _cache[cache_key] = {"type": "FeatureCollection", "features": merged_features}
+    return _cache[cache_key]
+
+
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Data Centre Heatmap</title>
+    <title>Data Center Heatmap</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -110,8 +126,8 @@ HTML = """
     <div class="loading" id="loading">Loading map data...</div>
 
     <div class="info-panel">
-        <h1>Data Centre Suitability</h1>
-        <p>Heatmap of the USA by county &mdash; hover for details</p>
+        <h1>Data Center Suitability</h1>
+        <p>Heatmap of scored regions &mdash; hover for details</p>
     </div>
 
     <div class="legend">
@@ -134,12 +150,10 @@ HTML = """
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         const map = L.map('map', {
-            center: [39.0, -96.0],
-            zoom: 5,
+            center: [30.0, -15.0],
+            zoom: 2,
             zoomControl: false,
-            maxBounds: [[24, -130], [50, -65]],
-            maxBoundsViscosity: 1.0,
-            minZoom: 4
+            minZoom: 2
         });
 
         L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -206,8 +220,16 @@ HTML = """
                         const props = feature.properties;
                         hoverInfo.style.display = 'block';
 
-                        hoverLoc.textContent = (props.NAME || '') + ' County';
-                        hoverCounty.textContent = 'FIPS: ' + (props.STATE||'') + (props.COUNTY||'');
+                        hoverLoc.textContent = props.NAME || 'Unknown region';
+                        if (props.COUNTRY && props.STATE) {
+                            hoverCounty.textContent = props.STATE + ', ' + props.COUNTRY;
+                        } else if (props.COUNTRY) {
+                            hoverCounty.textContent = props.COUNTRY;
+                        } else if (props.STATE) {
+                            hoverCounty.textContent = props.STATE;
+                        } else {
+                            hoverCounty.textContent = '';
+                        }
 
                         hoverScore.textContent = props.score + '/100';
                         hoverScore.style.color = scoreToColor(props.score);
@@ -233,7 +255,10 @@ HTML = """
         fetch('/api/counties')
             .then(r => r.json())
             .then(geojson => {
-                addRegionLayer(geojson);
+                const layer = addRegionLayer(geojson);
+                if (layer.getBounds && layer.getBounds().isValid()) {
+                    map.fitBounds(layer.getBounds(), { padding: [20, 20] });
+                }
                 loading.style.display = 'none';
             });
 
@@ -258,8 +283,10 @@ def index():
 
 @app.route("/api/counties")
 def counties():
-    return jsonify(load_geojson("counties_scored.geojson"))
+    return jsonify(load_scored_boundaries())
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", "5000"))
+    debug = os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"}
+    app.run(debug=debug, host="0.0.0.0", port=port)

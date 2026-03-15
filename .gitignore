@@ -1,0 +1,9 @@
+# Keep repository lean: ignore raw/intermediate data files.
+data/**
+
+# Keep runtime-scored boundary datasets tracked for the app.
+!data/
+!data/boundaries/
+!data/boundaries/can_scored.geojson
+!data/boundaries/chn_scored.geojson
+!data/boundaries/mex_scored.geojson
