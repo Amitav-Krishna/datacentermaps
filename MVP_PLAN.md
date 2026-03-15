@@ -1,0 +1,23 @@
+priorities for next 10 minutes:
+1. simple heuristic for regulation speed.  Find a good heuristic for time to break ground
+   1. number of zoning laws
+   2. Average time to zone a proprety
+2. add an overlay of internet fibre cables, add that as a score of speed of fibre available in that county.  
+3. Add toggles for different data sources on the 
+1. add canada, mexico, and china
+  - Reach: europe, south america, asia, africa
+3. Location of existing data centres
+4. Transmission lines
+5. Fibre connectivity
+6. Distance to grid
+7. Distance to hyperscalar
+8. Distance to metro
+9. Native reservations
+10. Fibre speeds
+11. Use deck.gl so you can have 3 dimensional visualizations of like 
+12. Any metric
+13. Have toggles for each of the different data sources (land price, power price, labour price, regulatory burden, etc.)
+14. federal owned land, faa regulations, tribal land, etc.
+15. encode a bunch of different regulations into the map
+16. They look at dozens of pieces of land every week, how quickly can we show in a UI all of the regulations and permits and whatnot
+17. What is going to make a deal to make a gigawatt of compiute?  Speed.  If provider A and provider B offer infra.  They propose a cluster ot a customer, so they need speed, pricing is good, but permitting fucks up speed. Speed wins customers.  you can see who each parcel is owned by.  Permitting is very helpful because you don't want to go down the line and then get stopped because of some regulations.  We should focus on permits right now.  Can we encode these restrictions into a map?  You want to simplify your pipeline of due diligence.  Mostly focused on the US.  We should focus on the US.  The US has a bunch of data.  Either do breadth or depth, depth is more important.  US and Canada.  Do canada as well, less explored.  We're optimizing time to first token when costruction.  What are the three most important things you neec to know about a location in the US.  General trend is that people that have land on top of power under it is charging more money because the permitting has already been done.  If you're looking at places you can get building as soon as possible.  large parcels of land owned by the least amount of people.  Short-term we care about time to start building.  Is there a way to measure how much time it would take?  Just look at these big DC deals to see what's been done.  Access to power natrual gas, 2. how many people own the land, and 3. is permitting.  Access to natural resources, keeping track of nearest network connection.  Overlay of powerlines as well.  What are the fibre connections.  What does it take for me to start building here?  What are the hurdles that I need to get through to break ground?  US 
