@@ -132,7 +132,22 @@ for r in range(2, ws_cato.max_row + 1):
 state_reg = {k: v[1] for k, v in state_reg_score.items()}
 print(f"Loaded regulatory scores for {len(state_reg)} states")
 
-# --- 5. Normalize to 0-100 scores ---
+# --- 5. Load broadband tiers (county-level, FCC Form 477) ---
+county_broadband = {}
+with open("data/fibre/county_tiers_201406_202406/county_tiers_201406_202406.csv", encoding="latin-1") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        fips = row["FIPS"]
+        year = int(row["Year"])
+        month = int(row["Month"])
+        key = (year, month)
+        if fips not in county_broadband or key > county_broadband[fips][0]:
+            county_broadband[fips] = (key, int(row["Tier_1"]))
+
+county_bb = {k: v[1] for k, v in county_broadband.items()}
+print(f"Loaded broadband tiers for {len(county_bb)} counties")
+
+# --- 6. Normalize to 0-100 scores ---
 power_prices = list(state_power_price.values())
 power_min, power_max = min(power_prices), max(power_prices)
 
@@ -153,6 +168,7 @@ print(f"Power price range: {power_min} - {power_max} cents/kWh")
 print(f"Home value range: ${home_min:,} - ${int(home_p95):,} (p95)")
 print(f"Permits/1k pop range: {permits_min:.2f} - {permits_p95:.2f} (p95)")
 print(f"Regulatory score range: {reg_min:.3f} - {reg_max:.3f}")
+print(f"Broadband tier range: 0 - 5")
 
 
 def normalize_inverse(value, vmin, vmax):
@@ -171,20 +187,22 @@ def normalize(value, vmin, vmax):
     return 100 * (clamped - vmin) / (vmax - vmin)
 
 
-# --- 5. Load GeoJSON and compute scores ---
+# --- 7. Load GeoJSON and compute scores ---
 with open("counties.geojson") as f:
     geojson = json.load(f)
 
-WEIGHT_POWER = 0.30
-WEIGHT_LAND = 0.25
-WEIGHT_PERMITS = 0.25
-WEIGHT_REG = 0.20
+WEIGHT_POWER = 0.25
+WEIGHT_LAND = 0.20
+WEIGHT_PERMITS = 0.20
+WEIGHT_REG = 0.15
+WEIGHT_BB = 0.20
 
 scored = 0
 missing_power = 0
 missing_land = 0
 missing_permits = 0
 missing_reg = 0
+missing_bb = 0
 
 for feature in geojson["features"]:
     props = feature["properties"]
@@ -221,37 +239,34 @@ for feature in geojson["features"]:
     else:
         missing_reg += 1
 
-    # Weighted average of available scores
-    scores = []
-    weights = []
-    if power_score is not None:
-        scores.append(power_score)
-        weights.append(WEIGHT_POWER)
-    if land_score is not None:
-        scores.append(land_score)
-        weights.append(WEIGHT_LAND)
-    if permit_score is not None:
-        scores.append(permit_score)
-        weights.append(WEIGHT_PERMITS)
-    if reg_score_val is not None:
-        scores.append(reg_score_val)
-        weights.append(WEIGHT_REG)
-
-    if weights:
-        total_weight = sum(weights)
-        score = sum(s * w for s, w in zip(scores, weights)) / total_weight
+    # Broadband tier score (0-5 scale, higher = better)
+    bb_score = None
+    if fips in county_bb:
+        bb_score = normalize(county_bb[fips], 0, 5)
     else:
-        score = 50
+        missing_bb += 1
 
-    props["score"] = round(score, 1)
+    # Store individual layer scores (0-100) for frontend toggle support
+    props["s_power"] = round(power_score, 1) if power_score is not None else None
+    props["s_land"] = round(land_score, 1) if land_score is not None else None
+    props["s_permits"] = round(permit_score, 1) if permit_score is not None else None
+    props["s_reg"] = round(reg_score_val, 1) if reg_score_val is not None else None
+    props["s_broadband"] = round(bb_score, 1) if bb_score is not None else None
+
+    # Raw values for hover display
     props["power_price"] = state_power_price.get(state_abbr) if state_abbr else None
     props["home_value"] = county_home_value.get(fips)
     props["permits_pc"] = round(county_permits_pc[fips], 2) if fips in county_permits_pc else None
     props["reg_freedom"] = round(state_reg[state_abbr], 3) if (state_abbr and state_abbr in state_reg) else None
+    props["broadband_tier"] = county_bb.get(fips)
+
+    # Default combined score (all layers on, equal weight)
+    layer_scores = [s for s in [power_score, land_score, permit_score, reg_score_val, bb_score] if s is not None]
+    props["score"] = round(sum(layer_scores) / len(layer_scores), 1) if layer_scores else 50
     scored += 1
 
 print(f"\nScored {scored} counties")
-print(f"Missing: power={missing_power}, land={missing_land}, permits={missing_permits}, reg={missing_reg}")
+print(f"Missing: power={missing_power}, land={missing_land}, permits={missing_permits}, reg={missing_reg}, broadband={missing_bb}")
 
 with open("counties_scored.geojson", "w") as f:
     json.dump(geojson, f)

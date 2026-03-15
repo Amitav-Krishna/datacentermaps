@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request
 import json
 import os
 
@@ -103,6 +103,40 @@ HTML = """
             box-shadow: 0 2px 12px rgba(0,0,0,0.15);
             font-size: 14px;
         }
+
+        .toggles {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: white;
+            border-radius: 12px;
+            padding: 10px 16px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .toggle-btn {
+            padding: 6px 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            background: white;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+        }
+        .toggle-btn.active {
+            border-color: #333;
+            background: #333;
+            color: white;
+        }
+        .toggle-btn:hover {
+            border-color: #999;
+        }
     </style>
 </head>
 <body>
@@ -121,6 +155,15 @@ HTML = """
         <div class="legend-item"><div class="legend-color" style="background:#ffffbf"></div> Moderate (40-60)</div>
         <div class="legend-item"><div class="legend-color" style="background:#fdae61"></div> Below avg (20-40)</div>
         <div class="legend-item"><div class="legend-color" style="background:#d7191c"></div> Poor (0-20)</div>
+    </div>
+
+    <div class="toggles" id="toggles">
+        <button class="toggle-btn active" data-layer="power">Power Price</button>
+        <button class="toggle-btn active" data-layer="land">Land Cost</button>
+        <button class="toggle-btn active" data-layer="permits">Permits</button>
+        <button class="toggle-btn active" data-layer="reg">Regulation</button>
+        <button class="toggle-btn active" data-layer="broadband">Broadband</button>
+        <button class="toggle-btn active" data-layer="transmission">Transmission Lines</button>
     </div>
 
     <div class="hover-info" id="hover-info">
@@ -148,6 +191,31 @@ HTML = """
             attribution: '&copy; OpenStreetMap &copy; CARTO',
             maxZoom: 19
         }).addTo(map);
+
+        // Layer definitions: key -> { scoreField, label, format }
+        const LAYERS = {
+            power:     { field: 's_power',     label: 'Power',              fmt: p => p.power_price != null ? p.power_price + ' ¢/kWh' : 'n/a' },
+            land:      { field: 's_land',      label: 'Land cost',          fmt: p => p.home_value != null ? '$' + p.home_value.toLocaleString() : 'n/a' },
+            permits:   { field: 's_permits',   label: 'Permits/1k pop',     fmt: p => p.permits_pc != null ? '' + p.permits_pc : 'n/a' },
+            reg:       { field: 's_reg',       label: 'Regulatory freedom', fmt: p => p.reg_freedom != null ? '' + p.reg_freedom : 'n/a' },
+            broadband: { field: 's_broadband', label: 'Broadband tier',     fmt: p => p.broadband_tier != null ? p.broadband_tier + '/5' : 'n/a' }
+        };
+
+        // Track which layers are active
+        const activeLayers = { power: true, land: true, permits: true, reg: true, broadband: true, transmission: true };
+
+        function computeScore(props) {
+            let total = 0, count = 0;
+            for (const [key, cfg] of Object.entries(LAYERS)) {
+                if (!activeLayers[key]) continue;
+                const val = props[cfg.field];
+                if (val != null) {
+                    total += val;
+                    count++;
+                }
+            }
+            return count > 0 ? Math.round(total / count * 10) / 10 : 50;
+        }
 
         function scoreToColor(score) {
             if (score >= 80) return '#1a9641';
@@ -180,70 +248,131 @@ HTML = """
         const hoverDetails = document.getElementById('hover-details');
         const loading = document.getElementById('loading');
 
-        let activeLayer = null;
+        let activeHoverLayer = null;
+        let countyLayer = null;
+        let countyGeojsonData = null;
 
-        function addRegionLayer(geojson) {
-            return L.geoJSON(geojson, {
-                style: function(feature) {
-                    const score = feature.properties.score;
-                    return {
-                        fillColor: scoreToColor(score),
-                        fillOpacity: scoreToOpacity(score),
-                        color: '#fff',
-                        weight: 0.5,
-                        opacity: 0.5
-                    };
-                },
-                onEachFeature: function(feature, layer) {
-                    layer.on('mouseover', function(e) {
-                        if (activeLayer) {
-                            activeLayer.setStyle({ weight: 0.5, color: '#fff' });
-                        }
-                        this.setStyle({ weight: 2, color: '#333' });
-                        this.bringToFront();
-                        activeLayer = this;
-
-                        const props = feature.properties;
-                        hoverInfo.style.display = 'block';
-
-                        hoverLoc.textContent = (props.NAME || '') + ' County';
-                        hoverCounty.textContent = 'FIPS: ' + (props.STATE||'') + (props.COUNTY||'');
-
-                        hoverScore.textContent = props.score + '/100';
-                        hoverScore.style.color = scoreToColor(props.score);
-                        hoverLabel.textContent = scoreToLabel(props.score);
-
-                        let lines = [];
-                        lines.push('Power: ' + (props.power_price != null ? props.power_price + ' ¢/kWh (industrial)' : 'data not found'));
-                        lines.push('Median home: ' + (props.home_value != null ? '$' + props.home_value.toLocaleString() : 'data not found'));
-                        lines.push('Permits/1k pop: ' + (props.permits_pc != null ? props.permits_pc : 'data not found'));
-                        lines.push('Regulatory freedom: ' + (props.reg_freedom != null ? props.reg_freedom : 'data not found'));
-                        var details = lines.length ? lines.join('<br>') : '';
-                        hoverDetails.innerHTML = details;
-                    });
-                    layer.on('mouseout', function(e) {
-                        this.setStyle({ weight: 0.5, color: '#fff' });
-                        hoverInfo.style.display = 'none';
-                        activeLayer = null;
-                    });
-                }
-            }).addTo(map);
+        function styleFeature(feature) {
+            const score = computeScore(feature.properties);
+            return {
+                fillColor: scoreToColor(score),
+                fillOpacity: scoreToOpacity(score),
+                color: '#fff',
+                weight: 0.5,
+                opacity: 0.5
+            };
         }
 
+        function onFeatureHover(feature, layer) {
+            layer.on('mouseover', function(e) {
+                if (activeHoverLayer) {
+                    activeHoverLayer.setStyle({ weight: 0.5, color: '#fff' });
+                }
+                this.setStyle({ weight: 2, color: '#333' });
+                this.bringToFront();
+                activeHoverLayer = this;
+
+                const props = feature.properties;
+                const score = computeScore(props);
+                hoverInfo.style.display = 'block';
+                hoverLoc.textContent = (props.NAME || '') + ' County';
+                hoverCounty.textContent = 'FIPS: ' + (props.STATE||'') + (props.COUNTY||'');
+                hoverScore.textContent = score + '/100';
+                hoverScore.style.color = scoreToColor(score);
+                hoverLabel.textContent = scoreToLabel(score);
+
+                let lines = [];
+                for (const [key, cfg] of Object.entries(LAYERS)) {
+                    const active = activeLayers[key];
+                    const prefix = active ? '' : '<span style="color:#bbb">';
+                    const suffix = active ? '' : '</span>';
+                    lines.push(prefix + cfg.label + ': ' + cfg.fmt(props) + suffix);
+                }
+                hoverDetails.innerHTML = lines.join('<br>');
+            });
+            layer.on('mouseout', function(e) {
+                this.setStyle({ weight: 0.5, color: '#fff' });
+                hoverInfo.style.display = 'none';
+                activeHoverLayer = null;
+            });
+        }
+
+        function refreshStyles() {
+            if (!countyLayer) return;
+            countyLayer.eachLayer(function(layer) {
+                layer.setStyle(styleFeature(layer.feature));
+            });
+        }
+
+        // Load counties
         fetch('/api/counties')
             .then(r => r.json())
             .then(geojson => {
-                addRegionLayer(geojson);
+                countyGeojsonData = geojson;
+                countyLayer = L.geoJSON(geojson, {
+                    style: styleFeature,
+                    onEachFeature: onFeatureHover
+                }).addTo(map);
                 loading.style.display = 'none';
             });
 
-        // Hide layers while panning for performance
+        // Transmission lines overlay
+        let transmissionLayer = null;
+
+        function loadTransmission() {
+            if (!activeLayers.transmission) return;
+            const bounds = map.getBounds();
+            const bbox = bounds.getWest() + ',' + bounds.getSouth() + ',' +
+                         bounds.getEast() + ',' + bounds.getNorth();
+
+            fetch('/api/transmission?bbox=' + bbox)
+                .then(r => r.json())
+                .then(geojson => {
+                    if (transmissionLayer) {
+                        map.removeLayer(transmissionLayer);
+                    }
+                    transmissionLayer = L.geoJSON(geojson, {
+                        style: { color: '#ff6600', weight: 1.5, opacity: 0.5 },
+                        onEachFeature: function(feature, layer) {
+                            const p = feature.properties;
+                            const tip = (p.volt_class || 'Unknown') + ' kV' +
+                                (p.owner && p.owner !== 'NOT AVAILABLE' ? ' — ' + p.owner : '');
+                            layer.bindTooltip(tip);
+                        }
+                    }).addTo(map);
+                });
+        }
+
+        loadTransmission();
+
+        // Toggle buttons
+        document.querySelectorAll('.toggle-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const layer = this.dataset.layer;
+                activeLayers[layer] = !activeLayers[layer];
+                this.classList.toggle('active');
+
+                if (layer === 'transmission') {
+                    if (activeLayers.transmission) {
+                        loadTransmission();
+                    } else if (transmissionLayer) {
+                        map.removeLayer(transmissionLayer);
+                        transmissionLayer = null;
+                    }
+                } else {
+                    refreshStyles();
+                }
+            });
+        });
+
+        // Hide layers while panning for performance, reload transmission on stop
         var pane = map.getPane('overlayPane');
         map.on('movestart', function() {
             pane.style.visibility = 'hidden';
         });
         map.on('moveend', function() {
             pane.style.visibility = 'visible';
+            if (activeLayers.transmission) loadTransmission();
         });
     </script>
 </body>
@@ -259,6 +388,47 @@ def index():
 @app.route("/api/counties")
 def counties():
     return jsonify(load_geojson("counties_scored.geojson"))
+
+
+@app.route("/api/fibre")
+def fibre():
+    return jsonify(load_geojson("data/fibre/fibre.geojson"))
+
+
+_transmission = None
+
+def get_transmission():
+    global _transmission
+    if _transmission is None:
+        with open(os.path.join(BASE, "data/transmission_lines.geojson")) as f:
+            _transmission = json.load(f)["features"]
+    return _transmission
+
+
+@app.route("/api/transmission")
+def transmission():
+    features = get_transmission()
+    bbox = request.args.get("bbox")  # west,south,east,north
+
+    # Filter to viewport if bbox provided
+    if bbox:
+        west, south, east, north = [float(x) for x in bbox.split(",")]
+        visible = []
+        for f in features:
+            coords = f["geometry"]["coordinates"]
+            if f["geometry"]["type"] == "MultiLineString":
+                coords = coords[0]
+            # Check if first coord is in bbox (fast approximate filter)
+            if coords:
+                lon, lat = coords[0]
+                if west <= lon <= east and south <= lat <= north:
+                    visible.append(f)
+        features = visible
+
+    # Data is pre-sorted longest first — take top 1000 visible
+    features = sorted(features, key=lambda f: f['properties'].get('length', 0), reverse=True)[:1000]
+
+    return jsonify({"type": "FeatureCollection", "features": features})
 
 
 if __name__ == "__main__":
